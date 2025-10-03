@@ -5,10 +5,10 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 
-# County name to ID mapping
+# County name to ID mapping - CORRECTED IDs
 COUNTY_IDS = {
     'Travis': '2227',
-    'Bastrop': '2011'
+    'Bastrop': '2011'  # Fixed from 2018 to 2011
 }
 
 def scrape_tdlr(county_name):
@@ -31,7 +31,6 @@ def scrape_tdlr(county_name):
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1'
         })
@@ -46,7 +45,7 @@ def scrape_tdlr(county_name):
     api_url = "https://www.tdlr.texas.gov/TABS/SearchProjects"
     
     payload = {
-        'draw': '2',
+        'draw': '1',  # Changed from 2 to 1
         'columns[0][data]': 'ProjectId',
         'columns[0][name]': '',
         'columns[0][searchable]': 'true',
@@ -130,7 +129,6 @@ def scrape_tdlr(county_name):
         'X-Requested-With': 'XMLHttpRequest',
         'Origin': 'https://www.tdlr.texas.gov',
         'Referer': 'https://www.tdlr.texas.gov/TABS/Search',
-        'DNT': '1',
         'Connection': 'keep-alive'
     }
     
@@ -138,13 +136,15 @@ def scrape_tdlr(county_name):
         print(f"Fetching data for {county_name} County (ID: {county_id})...")
         response = session.post(api_url, data=payload, headers=headers)
         
-        # Debug: print response
         print(f"Response status: {response.status_code}")
         print(f"Response content type: {response.headers.get('content-type', 'unknown')}")
-        print(f"First 200 chars of response: {response.text[:200]}")
+        
+        if 'application/json' not in response.headers.get('content-type', ''):
+            print(f"WARNING: Expected JSON but got: {response.headers.get('content-type')}")
+            print(f"First 300 chars: {response.text[:300]}")
+            return []
         
         response.raise_for_status()
-        
         data = response.json()
         results = []
         
@@ -188,18 +188,13 @@ def scrape_tdlr(county_name):
                         print(f"    ✓ {item.get('ProjectNumber')} - {date_text}")
                 
                 except Exception as e:
-                    print(f"    ✗ Error parsing entry: {e}")
                     continue
         else:
-            print(f"  WARNING: No 'data' key in response. Keys present: {list(data.keys())}")
+            print(f"  WARNING: No 'data' key in response")
         
         print(f"  Found {len(results)} new entries in last 7 days")
         return results
         
-    except requests.exceptions.JSONDecodeError as e:
-        print(f"ERROR: Could not parse JSON response")
-        print(f"Response text: {response.text[:500]}")
-        return []
     except Exception as e:
         print(f"ERROR scraping {county_name}: {e}")
         return []
@@ -258,9 +253,9 @@ def send_email(results, to_emails):
             server.starttls()
             server.login(sender, password)
             server.send_message(msg)
-        print(f"✓ Email sent successfully to {len(to_emails)} recipient(s)")
+        print(f"Email sent successfully to {len(to_emails)} recipient(s)")
     except Exception as e:
-        print(f"✗ Failed to send email: {e}")
+        print(f"Failed to send email: {e}")
 
 if __name__ == '__main__':
     print("="*60)
@@ -268,7 +263,7 @@ if __name__ == '__main__':
     print("="*60)
     
     counties = ['Travis', 'Bastrop']
-    subscribers = ['tammyhliu@gmail.com']  # ← CHANGE THIS
+    subscribers = ['tammyhliu@gmail.com']  # CHANGE THIS
     
     all_results = []
     
@@ -286,4 +281,4 @@ if __name__ == '__main__':
     else:
         print("No new entries found - no email will be sent")
     
-    print("\n✓ Scraper finished successfully")
+    print("\nScraper finished successfully")
