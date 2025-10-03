@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 
-# County name to ID mapping (you can find more IDs by inspecting the dropdown)
+# County name to ID mapping
 COUNTY_IDS = {
     'Travis': '2227',
     'Bastrop': '2011'
@@ -19,9 +19,32 @@ def scrape_tdlr(county_name):
         return []
     
     county_id = COUNTY_IDS[county_name]
-    url = "https://www.tdlr.texas.gov/TABS/SearchProjects"
     
-    # Exact payload structure from the Network tab
+    # First, get the main page to establish a session
+    session = requests.Session()
+    main_url = "https://www.tdlr.texas.gov/TABS/Search"
+    
+    try:
+        print(f"Establishing session...")
+        response = session.get(main_url, headers={
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        })
+        response.raise_for_status()
+        print(f"Session established")
+        
+    except Exception as e:
+        print(f"ERROR establishing session: {e}")
+        return []
+    
+    # Now make the API request
+    api_url = "https://www.tdlr.texas.gov/TABS/SearchProjects"
+    
     payload = {
         'draw': '2',
         'columns[0][data]': 'ProjectId',
@@ -93,22 +116,33 @@ def scrape_tdlr(county_name):
         'order[0][column]': '3',
         'order[0][dir]': 'desc',
         'start': '0',
-        'length': '100',  # Get up to 100 results
+        'length': '100',
         'search[value]': '',
         'search[regex]': 'false',
-        'LocationCounty': county_id  # The key parameter!
+        'LocationCounty': county_id
     }
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'en-US,en;q=0.9',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'X-Requested-With': 'XMLHttpRequest',
-        'Accept': 'application/json'
+        'Origin': 'https://www.tdlr.texas.gov',
+        'Referer': 'https://www.tdlr.texas.gov/TABS/Search',
+        'DNT': '1',
+        'Connection': 'keep-alive'
     }
     
     try:
         print(f"Fetching data for {county_name} County (ID: {county_id})...")
-        response = requests.post(url, data=payload, headers=headers)
+        response = session.post(api_url, data=payload, headers=headers)
+        
+        # Debug: print response
+        print(f"Response status: {response.status_code}")
+        print(f"Response content type: {response.headers.get('content-type', 'unknown')}")
+        print(f"First 200 chars of response: {response.text[:200]}")
+        
         response.raise_for_status()
         
         data = response.json()
@@ -121,7 +155,6 @@ def scrape_tdlr(county_name):
             print(f"  Received {len(data['data'])} total records")
             
             for item in data['data']:
-                # Parse the creation date
                 date_text = item.get('ProjectCreatedOn', '')
                 if not date_text:
                     continue
@@ -155,12 +188,18 @@ def scrape_tdlr(county_name):
                         print(f"    ✓ {item.get('ProjectNumber')} - {date_text}")
                 
                 except Exception as e:
-                    print(f"    ✗ Error parsing date '{date_text}': {e}")
+                    print(f"    ✗ Error parsing entry: {e}")
                     continue
+        else:
+            print(f"  WARNING: No 'data' key in response. Keys present: {list(data.keys())}")
         
         print(f"  Found {len(results)} new entries in last 7 days")
         return results
         
+    except requests.exceptions.JSONDecodeError as e:
+        print(f"ERROR: Could not parse JSON response")
+        print(f"Response text: {response.text[:500]}")
+        return []
     except Exception as e:
         print(f"ERROR scraping {county_name}: {e}")
         return []
@@ -184,10 +223,8 @@ def send_email(results, to_emails):
     msg['To'] = ', '.join(to_emails)
     msg['Subject'] = f'New TDLR Architectural Barriers Projects - {len(results)} entries'
     
-    # Build email body
     body = f"New architectural barriers projects filed in the last 7 days:\n\n"
     
-    # Group by county
     by_county = {}
     for r in results:
         county = r['county']
@@ -230,9 +267,8 @@ if __name__ == '__main__':
     print("TDLR Architectural Barriers Project Monitor")
     print("="*60)
     
-    # CONFIGURATION - CHANGE THESE VALUES
     counties = ['Travis', 'Bastrop']
-    subscribers = ['tammyhliu@gmail.com']  # ← CHANGE THIS TO YOUR EMAIL
+    subscribers = ['tammyhliu@gmail.com']  # ← CHANGE THIS
     
     all_results = []
     
